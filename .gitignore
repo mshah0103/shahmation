@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+
+# Node / TypeScript
+node_modules/
+
+# PlatformIO
+.pio/
+.vscode/.browse.c_cpptools
+.vscode/c_cpp_properties.json
+.vscode/launch.json
+.vscode/ipch/
+
+# Database
+*.db
+*.sqlite
+
+# macOS
+.DS_Store
