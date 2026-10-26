@@ -17,5 +17,11 @@ node_modules/
 *.db
 *.sqlite
 
+# MIDI library
+ShahMation Midi Library/
+
+# Presentation Material
+presentation/
+
 # macOS
 .DS_Store
