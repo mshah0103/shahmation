@@ -72,7 +72,7 @@ class MusicLibrary:
         already_have = set(row["relative_path"] for row in rows)
 
         added = 0
-        # "with self.conn" means if anything crashes, the unfinished batch gets thrown out
+        # "with self.conn" if anything crashes, the unfinished batch gets thrown out
         with self.conn, open(csv_path, newline="", encoding="utf-8-sig") as file:
             for row in csv.DictReader(file):
                 path = row["library_path"]
@@ -106,8 +106,8 @@ class MusicLibrary:
         return added
 
     def make_where(self, text):
-        # builds the WHERE part for search() and count() so they always match.
-        # the ? placeholders mean whatever the user types is just text
+        # builds the WHERE part for search() and count() so they always match
+        # ? placeholders mean whatever the user types is just text
         # it never gets run as SQL
         text = text.strip()
         if text == "":
