@@ -1,5 +1,5 @@
-// ShahMation Library screen (S1)
-// Search box + list of songs. Searching happens on the Pi through /api/songs.
+// ShahMation Library screen
+// search box + list of songs
 
 type Song = {
   music_id: number;
@@ -34,7 +34,7 @@ const tableBody = table.createTBody();
 
 document.body.append(heading, searchBox, statusLine, table);
 
-// 125.4 -> "2:05", and a dash if we don't know the length
+// seconds to minutes with a dash as placeholder if value cannot be determined
 function formatLength(seconds: number | null): string {
   if (seconds === null) {
     return "–";
@@ -48,7 +48,7 @@ function showSongs(songs: Song[]) {
   tableBody.innerHTML = ""; // clear out the old rows
   for (const song of songs) {
     const row = tableBody.insertRow();
-    // using textContent so a weird song title just shows up as text (TC-R02)
+    // using textContent so an odd song title shows up as text
     row.insertCell().textContent = song.title;
     row.insertCell().textContent = song.composer ?? "";
     row.insertCell().textContent = formatLength(song.duration_seconds);
@@ -63,7 +63,7 @@ async function search(query: string) {
     }
     const data: SongsResponse = await response.json();
 
-    // if the user kept typing while this was loading, this answer is old so skip it
+    // if the user kept typing while this was loading answer gets skipped
     if (query !== searchBox.value.trim()) {
       return;
     }
@@ -73,19 +73,23 @@ async function search(query: string) {
       statusLine.textContent = "No songs match '" + query + "'";
     } else {
       statusLine.textContent =
-        "Showing " + data.songs.length.toLocaleString() + " of " + data.total.toLocaleString() + " songs";
+        "Showing " +
+        data.songs.length.toLocaleString() +
+        " of " +
+        data.total.toLocaleString() +
+        " songs";
     }
   } catch {
-    // same thing here, an old search failing shouldn't cover up newer results
+    // an old search failing does not cover new results
     if (query !== searchBox.value.trim()) {
       return;
     }
-    // keep whatever songs were already showing (slide 21: show error, keep saved data)
+    // keep whatever songs were already showing
     statusLine.textContent = "Couldn't load the library";
   }
 }
 
-// wait until the user stops typing for 250ms so we don't search on every key
+// wait until the user stops typing for 250ms
 let typingTimer: number | undefined;
 searchBox.addEventListener("input", () => {
   clearTimeout(typingTimer);
