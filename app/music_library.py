@@ -3,6 +3,7 @@
 
 import csv
 import hashlib
+import io
 import sqlite3
 from dataclasses import dataclass
 from datetime import datetime
@@ -12,6 +13,9 @@ import mido
 
 # save to the database every 500 songs to make sure interrupts don't impact load
 BATCH_SIZE = 500
+
+# biggest midi upload allowed (2 MB)
+MAX_UPLOAD_BYTES = 2 * 1024 * 1024
 
 
 # one row of the music_item table
@@ -29,13 +33,15 @@ class MusicItem:
 
 class MusicLibrary:
 
-    def __init__(self, db_path, library_folder):
+    def __init__(self, db_path, library_folder, personal_folder):
         self.library_folder = Path(library_folder)
+        self.personal_folder = Path(personal_folder)
+        self.personal_folder.mkdir(parents=True, exist_ok=True)
 
         # make the data folder if this is the first run
         Path(db_path).parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(db_path)
-        self.conn.row_factory = sqlite3.Row  # lets me do row["title"]
+        self.conn.row_factory = sqlite3.Row  # picks out a column's value by name
 
         # IF NOT EXISTS so restarts do not wipe
         self.conn.executescript("""
@@ -72,7 +78,7 @@ class MusicLibrary:
         already_have = set(row["relative_path"] for row in rows)
 
         added = 0
-        # "with self.conn" if anything crashes, the unfinished batch gets thrown out
+        # "with self.conn" if anything crashes the unfinished batch gets thrown out
         with self.conn, open(csv_path, newline="", encoding="utf-8-sig") as file:
             for row in csv.DictReader(file):
                 path = row["library_path"]
@@ -87,7 +93,7 @@ class MusicLibrary:
                 data = full_path.read_bytes()
                 sha256 = hashlib.sha256(data).hexdigest()
 
-                # some old midi files are broken leave the length blank
+                # if some old midi files are broken leave the length blank
                 try:
                     length = mido.MidiFile(full_path).length
                 except Exception:
@@ -107,8 +113,7 @@ class MusicLibrary:
 
     def make_where(self, text):
         # builds the WHERE part for search() and count() so they always match
-        # ? placeholders mean whatever the user types is just text
-        # it never gets run as SQL
+        # ? placeholders mean whatever the user types is just text and can't be accidently run
         text = text.strip()
         if text == "":
             return "", []
@@ -129,3 +134,67 @@ class MusicLibrary:
         # how many songs match in total
         where, params = self.make_where(text)
         return self.conn.execute("SELECT COUNT(*) FROM music_item" + where, params).fetchone()[0]
+
+    def add(self, name, data):
+        # saves an uploaded midi file into the personal folder and the database
+        # raises ValueError with a message shown if the upload is bad
+        # only keep the file name so ../ can't get out of the folder
+        name = Path(name).name.strip()
+        if Path(name).suffix.lower() not in (".mid", ".midi"):
+            raise ValueError("Please pick a .mid or .midi file")
+        title = Path(name).stem.replace("_", " ").strip()
+        if title == "":
+            raise ValueError("The file needs a name")
+
+        if len(data) == 0:
+            raise ValueError("The file is empty")
+        if len(data) > MAX_UPLOAD_BYTES:
+            raise ValueError("The file is too big (2 MB max)")
+
+        try:
+            song = mido.MidiFile(file=io.BytesIO(data))
+            length = song.length
+            has_notes = any(m.type == "note_on" and m.velocity > 0 for m in song)
+        except Exception:
+            raise ValueError("The file isn't a valid MIDI file")
+        if not has_notes:
+            raise ValueError("The MIDI file has no notes in it")
+
+        # same name or same contents
+        sha256 = hashlib.sha256(data).hexdigest()
+        row = self.conn.execute(
+            "SELECT 1 FROM music_item WHERE source_kind = 'personal' AND relative_path = ?",
+            (name,),
+        ).fetchone()
+        if row:
+            raise ValueError("You already have a song with that file name")
+        row = self.conn.execute(
+            "SELECT title FROM music_item WHERE sha256 = ?", (sha256,)
+        ).fetchone()
+        if row:
+            raise ValueError("That song is already in the library as '" + row["title"] + "'")
+
+        # mac file names aren't case sensitive so Song.mid could overwrite song.mid
+        path = self.personal_folder / name
+        if path.exists():
+            raise ValueError("You already have a song with that file name")
+
+        # if the file can't be saved the insert gets thrown out
+        try:
+            with self.conn:
+                cursor = self.conn.execute(
+                    "INSERT INTO music_item (source_kind, relative_path, title, composer, "
+                    "duration_seconds, sha256, added_at) VALUES ('personal', ?, ?, NULL, ?, ?, ?)",
+                    (name, title, length, sha256, datetime.now().isoformat(timespec="seconds")),
+                )
+                path.write_bytes(data)
+        except Exception:
+            # cleans up halfsies
+            if path.exists():
+                path.unlink()
+            raise
+
+        row = self.conn.execute(
+            "SELECT * FROM music_item WHERE music_id = ?", (cursor.lastrowid,)
+        ).fetchone()
+        return MusicItem(**dict(row))

@@ -2,6 +2,7 @@
 # each test is named after the test case
 # run from the app folder with: python -m unittest -v
 
+import io
 import sqlite3
 import tempfile
 import unittest
@@ -10,7 +11,7 @@ from pathlib import Path
 import mido
 
 import music_library
-from music_library import MusicLibrary
+from music_library import MusicLibrary, MAX_UPLOAD_BYTES
 
 
 def make_midi(path):
@@ -22,6 +23,18 @@ def make_midi(path):
     track.append(mido.Message("note_off", note=60, velocity=64, time=480))
     song.tracks.append(track)
     song.save(path)
+
+
+def midi_bytes(note=60):
+    # same as make_midi but gives back the bytes like an upload would
+    song = mido.MidiFile()
+    track = mido.MidiTrack()
+    track.append(mido.Message("note_on", note=note, velocity=64, time=0))
+    track.append(mido.Message("note_off", note=note, velocity=64, time=480))
+    song.tracks.append(track)
+    buffer = io.BytesIO()
+    song.save(file=buffer)
+    return buffer.getvalue()
 
 
 class MusicLibraryTests(unittest.TestCase):
@@ -36,7 +49,7 @@ class MusicLibraryTests(unittest.TestCase):
         make_midi(self.lib_folder / "A-D/Claude Debussy/Clair de Lune.mid")
         make_midi(self.lib_folder / "Q-T/Scott Joplin/Maple Leaf Rag.mid")
         make_midi(self.lib_folder / "A-D/Antonín Dvořák/Humoresque.mid")
-        # junk file that isn't really midi
+        # junk file that isn't midi
         (self.lib_folder / "A-D/Bad").mkdir(parents=True)
         (self.lib_folder / "A-D/Bad/Broken.mid").write_bytes(b"not midi")
 
@@ -51,7 +64,8 @@ class MusicLibraryTests(unittest.TestCase):
             "Gone,Missing,A-D/Gone/Missing.mid\n",
             encoding="utf-8-sig",
         )
-        self.library = MusicLibrary(self.db_path, self.lib_folder)
+        self.personal = folder / "personal"
+        self.library = MusicLibrary(self.db_path, self.lib_folder, self.personal)
 
     def tearDown(self):
         self.library.close()
@@ -67,7 +81,7 @@ class MusicLibraryTests(unittest.TestCase):
         self.library.close()
 
         # reopen like the app restarted
-        self.library = MusicLibrary(self.db_path, self.lib_folder)
+        self.library = MusicLibrary(self.db_path, self.lib_folder, self.personal)
         count = self.library.conn.execute("SELECT COUNT(*) FROM music_item").fetchone()[0]
         self.assertEqual(count, 4)
 
@@ -137,6 +151,82 @@ class MusicLibraryTests(unittest.TestCase):
         self.library.load_index(self.csv_path)
         composers = [song.composer for song in self.library.search("")]
         self.assertEqual(composers, ["Antonín Dvořák", "Bad", "Claude Debussy", "Scott Joplin"])
+
+    def test_tc_p02_add_survives_restart(self):
+        item = self.library.add("My Song.mid", midi_bytes())
+        self.assertEqual(item.source_kind, "personal")
+        self.assertEqual(item.title, "My Song")
+        self.assertIsNone(item.composer)
+        self.assertGreater(item.duration_seconds, 0)
+        self.assertTrue((self.personal / "My Song.mid").exists())
+
+        # reopen like the app restarted
+        self.library.close()
+        self.library = MusicLibrary(self.db_path, self.lib_folder, self.personal)
+        self.assertEqual(self.library.search("my song")[0].music_id, item.music_id)
+
+    def test_tc_r01_rejects_bad_files(self):
+        # real midi file but nothing plays
+        no_notes = mido.MidiFile()
+        no_notes.tracks.append(mido.MidiTrack([mido.MetaMessage("end_of_track", time=0)]))
+        buffer = io.BytesIO()
+        no_notes.save(file=buffer)
+
+        bad_uploads = [
+            ("x.mid", b""),
+            ("x.mid", b"not midi"),
+            ("x.txt", midi_bytes()),
+            ("x.mid", b"0" * (MAX_UPLOAD_BYTES + 1)),
+            ("x.mid", buffer.getvalue()),
+        ]
+        for name, data in bad_uploads:
+            with self.assertRaises(ValueError):
+                self.library.add(name, data)
+            self.assertEqual(self.library.count(""), 0)
+            self.assertEqual(list(self.personal.iterdir()), [])
+
+    def test_tc_r02_name_stays_in_folder(self):
+        item = self.library.add("../../evil.mid", midi_bytes())
+        self.assertEqual(item.relative_path, "evil.mid")
+        self.assertTrue((self.personal / "evil.mid").exists())
+
+        item = self.library.add("'; DROP TABLE music_item; --.mid", midi_bytes(62))
+        # the underscore turns into a space
+        self.assertEqual(item.title, "'; DROP TABLE music item; --")
+        self.assertEqual(self.library.count(""), 2)
+
+    def test_tc_r03_duplicate_upload(self):
+        self.library.add("a.mid", midi_bytes())
+        # same name different song
+        with self.assertRaises(ValueError):
+            self.library.add("a.mid", midi_bytes(62))
+        # different name same song
+        with self.assertRaises(ValueError):
+            self.library.add("b.mid", midi_bytes())
+        self.assertEqual(self.library.count(""), 1)
+        # file already on disk that the db doesn't know about
+        (self.personal / "old.mid").write_bytes(b"old")
+        with self.assertRaises(ValueError):
+            self.library.add("old.mid", midi_bytes(65))
+        self.assertEqual((self.personal / "old.mid").read_bytes(), b"old")
+
+    def test_uppercase_extension_ok(self):
+        self.assertEqual(self.library.add("SONG.MID", midi_bytes()).title, "SONG")
+        self.assertEqual(self.library.add("tune.midi", midi_bytes(64)).title, "tune")
+
+    def test_tc_r04_failed_save_rolls_back(self):
+        # personal is a plain file now so saving can't work
+        self.personal.rmdir()
+        self.personal.write_text("x")
+        with self.assertRaises(OSError):
+            self.library.add("a.mid", midi_bytes())
+        self.assertEqual(self.library.count(""), 0)
+
+    def test_blank_name_rejected(self):
+        with self.assertRaises(ValueError):
+            self.library.add(".mid", midi_bytes())
+        with self.assertRaises(ValueError):
+            self.library.add("   .mid", midi_bytes())
 
 
 if __name__ == "__main__":

@@ -1,16 +1,19 @@
 #include <Arduino.h>
+#include <Board.h>
 
-  unsigned long lastToggle = 0;
-  bool ledOn = false;
+Board board;
 
-  void setup() {
-    pinMode(LED_BUILTIN, OUTPUT);
-  }
+void setup() {
+  Serial.begin(115200);
+  board.allOff();   // everything starts off
+}
 
-  void loop() {
-    if (millis() - lastToggle >= 500) {
-      lastToggle = millis();
-      ledOn = !ledOn;
-      digitalWrite(LED_BUILTIN, ledOn);
+void loop() {
+  // read whatever came in and answer once a full line is there
+  while (Serial.available()) {
+    const char* r = board.feed(Serial.read());
+    if (r) {
+      Serial.println(r);
     }
   }
+}

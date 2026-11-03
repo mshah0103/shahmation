@@ -17,6 +17,13 @@
       var searchBox = document.createElement("input");
       searchBox.type = "search";
       searchBox.placeholder = "Search by title or composer";
+      var addLabel = document.createElement("label");
+      addLabel.append("Add MIDI ");
+      var fileInput = document.createElement("input");
+      fileInput.type = "file";
+      fileInput.accept = ".mid,.midi";
+      addLabel.appendChild(fileInput);
+      var uploadStatus = document.createElement("p");
       var statusLine = document.createElement("p");
       var table = document.createElement("table");
       var headerRow = table.createTHead().insertRow();
@@ -26,7 +33,7 @@
         headerRow.appendChild(th);
       }
       var tableBody = table.createTBody();
-      document.body.append(heading, searchBox, statusLine, table);
+      document.body.append(heading, addLabel, uploadStatus, searchBox, statusLine, table);
       function formatLength(seconds) {
         if (seconds === null) {
           return "\u2013";
@@ -71,6 +78,35 @@
       searchBox.addEventListener("input", () => {
         clearTimeout(typingTimer);
         typingTimer = setTimeout(() => search(searchBox.value.trim()), 250);
+      });
+      fileInput.addEventListener("change", async () => {
+        const file = fileInput.files?.[0];
+        if (!file) {
+          return;
+        }
+        if (file.size > 2 * 1024 * 1024) {
+          uploadStatus.textContent = "That file is too big (2 MB max)";
+          fileInput.value = "";
+          return;
+        }
+        uploadStatus.textContent = "Adding " + file.name + "\u2026";
+        try {
+          const response = await fetch("/api/songs/upload?name=" + encodeURIComponent(file.name), {
+            method: "POST",
+            body: file
+          });
+          const data = await response.json();
+          if (response.ok) {
+            uploadStatus.textContent = "Added '" + data.title + "'";
+            searchBox.value = data.title;
+            search(data.title);
+          } else {
+            uploadStatus.textContent = data.error;
+          }
+        } catch {
+          uploadStatus.textContent = "Couldn't add the file";
+        }
+        fileInput.value = "";
       });
       search("");
     }

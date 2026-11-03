@@ -21,6 +21,16 @@ const searchBox = document.createElement("input");
 searchBox.type = "search";
 searchBox.placeholder = "Search by title or composer";
 
+// upload a midi file
+const addLabel = document.createElement("label");
+addLabel.append("Add MIDI ");
+const fileInput = document.createElement("input");
+fileInput.type = "file";
+fileInput.accept = ".mid,.midi";
+addLabel.appendChild(fileInput);
+
+const uploadStatus = document.createElement("p");
+
 const statusLine = document.createElement("p");
 
 const table = document.createElement("table");
@@ -32,7 +42,14 @@ for (const name of ["Title", "Composer", "Length"]) {
 }
 const tableBody = table.createTBody();
 
-document.body.append(heading, searchBox, statusLine, table);
+document.body.append(
+  heading,
+  addLabel,
+  uploadStatus,
+  searchBox,
+  statusLine,
+  table,
+);
 
 // seconds to minutes with a dash as placeholder if value cannot be determined
 function formatLength(seconds: number | null): string {
@@ -80,7 +97,7 @@ async function search(query: string) {
         " songs";
     }
   } catch {
-    // an old search failing does not cover new results
+    // an old search failing does not hide new results
     if (query !== searchBox.value.trim()) {
       return;
     }
@@ -94,6 +111,42 @@ let typingTimer: number | undefined;
 searchBox.addEventListener("input", () => {
   clearTimeout(typingTimer);
   typingTimer = setTimeout(() => search(searchBox.value.trim()), 250);
+});
+
+// send the chosen file to the server
+fileInput.addEventListener("change", async () => {
+  const file = fileInput.files?.[0];
+  if (!file) {
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    uploadStatus.textContent = "The file is too big (2 MB max)";
+    fileInput.value = "";
+    return;
+  }
+  uploadStatus.textContent = "Adding " + file.name + "…";
+  try {
+    const response = await fetch(
+      "/api/songs/upload?name=" + encodeURIComponent(file.name),
+      {
+        method: "POST",
+        body: file,
+      },
+    );
+    const data = await response.json();
+    if (response.ok) {
+      uploadStatus.textContent = "Added '" + data.title + "'";
+      // show the new song by searching for it
+      searchBox.value = data.title;
+      search(data.title);
+    } else {
+      uploadStatus.textContent = data.error;
+    }
+  } catch {
+    uploadStatus.textContent = "Couldn't add the file";
+  }
+  // so the same file can be picked again
+  fileInput.value = "";
 });
 
 // show everything when the page first opens
