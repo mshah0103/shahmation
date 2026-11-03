@@ -19,6 +19,7 @@ node_modules/
 
 # MIDI library
 ShahMation Midi Library/
+data/personal/
 
 # Presentation Material
 presentation/
