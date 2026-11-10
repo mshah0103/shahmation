@@ -135,6 +135,17 @@ class MusicLibrary:
         where, params = self.make_where(text)
         return self.conn.execute("SELECT COUNT(*) FROM music_item" + where, params).fetchone()[0]
 
+    def get(self, music_id):
+        row = self.conn.execute("SELECT * FROM music_item WHERE music_id = ?", [music_id]).fetchone()
+        if row is None:
+            return None
+        return MusicItem(**dict(row))
+
+    def file_path(self, song):
+        if song.source_kind == "personal":
+            return self.personal_folder / song.relative_path
+        return self.library_folder / song.relative_path
+
     def add(self, name, data):
         # saves an uploaded midi file into the personal folder and the database
         # raises ValueError with a message shown if the upload is bad

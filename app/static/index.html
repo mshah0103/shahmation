@@ -21,6 +21,40 @@
         width: 100%;
         border-collapse: collapse;
       }
+      .bar {
+        display: flex;
+        gap: 12px;
+        align-items: center;
+        padding: 8px;
+        margin-bottom: 8px;
+        background: #f2f2f2;
+      }
+      .bar span {
+        flex: 1;
+      }
+      button {
+        padding: 8px 14px;
+        font-size: 16px;
+      }
+      .panic {
+        background: #b3261e;
+        color: white;
+        font-weight: bold;
+        border: none;
+      }
+      input.note {
+        width: 100px;
+      }
+      tbody tr {
+        cursor: pointer;
+      }
+      tbody tr:hover {
+        background: #f7f7f7;
+      }
+      .songs {
+        max-height: 320px;
+        overflow-y: auto;
+      }
       th, td {
         text-align: left;
         padding: 8px;

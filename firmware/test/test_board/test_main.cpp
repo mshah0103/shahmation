@@ -24,7 +24,7 @@ void test_starts_off() {
 
 void test_hello_identity_plays_nothing() {
   Board b;
-  TEST_ASSERT_EQUAL_STRING("ID SHAHMATION KEY 1 21 108", send(b, "HELLO\n"));
+  TEST_ASSERT_EQUAL_STRING("ID SHAHMATION KEY 1 21 36", send(b, "HELLO\n"));
   TEST_ASSERT_EQUAL_INT(0, b.onCount());
 }
 
@@ -35,16 +35,16 @@ void test_ping() {
 
 void test_on_off() {
   Board b;
-  TEST_ASSERT_EQUAL_STRING("OK", send(b, "ON 60 100\n"));
-  TEST_ASSERT_TRUE(b.isOn(60));
-  TEST_ASSERT_EQUAL_STRING("OK", send(b, "OFF 60\n"));
-  TEST_ASSERT_FALSE(b.isOn(60));
+  TEST_ASSERT_EQUAL_STRING("OK", send(b, "ON 30 100\n"));
+  TEST_ASSERT_TRUE(b.isOn(30));
+  TEST_ASSERT_EQUAL_STRING("OK", send(b, "OFF 30\n"));
+  TEST_ASSERT_FALSE(b.isOn(30));
 }
 
 void test_alloff() {
   Board b;
-  send(b, "ON 60 100\n");
-  send(b, "ON 64 100\n");
+  send(b, "ON 30 100\n");
+  send(b, "ON 34 100\n");
   TEST_ASSERT_EQUAL_INT(2, b.onCount());
   TEST_ASSERT_EQUAL_STRING("OK", send(b, "ALLOFF\n"));
   TEST_ASSERT_EQUAL_INT(0, b.onCount());
@@ -58,14 +58,14 @@ void check_rejected(const char* text, const char* expected) {
 }
 
 void test_tc_r16_rejects_damaged() {
-  check_rejected("ON 60\n", "ERR bad format");
-  check_rejected("ON 60 abc\n", "ERR bad format");
-  check_rejected("ON 60 64 9\n", "ERR bad format");
-  check_rejected("ON60 64\n", "ERR unknown command");
+  check_rejected("ON 30\n", "ERR bad format");
+  check_rejected("ON 30 abc\n", "ERR bad format");
+  check_rejected("ON 30 64 9\n", "ERR bad format");
+  check_rejected("ON30 64\n", "ERR unknown command");
   check_rejected("ON 20 64\n", "ERR note out of range");
-  check_rejected("ON 109 64\n", "ERR note out of range");
-  check_rejected("ON 60 0\n", "ERR bad velocity");
-  check_rejected("ON 60 128\n", "ERR bad velocity");
+  check_rejected("ON 37 64\n", "ERR note out of range");
+  check_rejected("ON 30 0\n", "ERR bad velocity");
+  check_rejected("ON 30 128\n", "ERR bad velocity");
   check_rejected("FOO\n", "ERR unknown command");
 }
 
@@ -101,6 +101,51 @@ void test_empty_line_ignored() {
   TEST_ASSERT_NULL(b.feed('\n'));
 }
 
+void test_on_sets_key_power() {
+  Board b;
+  send(b, "ON 21 127\n");
+  TEST_ASSERT_EQUAL_INT(255, b.power(0));
+  TEST_ASSERT_EQUAL_INT(0, b.power(1));
+}
+
+void test_strike_then_hold() {
+  Board b;
+  b.update(0);
+  send(b, "ON 22 127\n");
+  b.update(STRIKE_MS);
+  TEST_ASSERT_EQUAL_INT(HOLD_POWER, b.power(1));
+}
+
+void test_tc_r15_timeout_turns_all_off() {
+  Board b;
+  b.update(1000);
+  send(b, "ON 30 100\n");
+  b.update(1000 + TIMEOUT_MS - 1);
+  TEST_ASSERT_TRUE(b.isOn(30));
+  b.update(1000 + TIMEOUT_MS);
+  TEST_ASSERT_EQUAL_INT(0, b.onCount());
+}
+
+void test_ping_keeps_notes_on() {
+  Board b;
+  b.update(0);
+  send(b, "ON 30 100\n");
+  b.update(1500);
+  send(b, "PING\n");
+  b.update(3000);
+  TEST_ASSERT_TRUE(b.isOn(30));
+}
+
+void test_tc_r16_bad_commands_dont_reset_timer() {
+  Board b;
+  b.update(0);
+  send(b, "ON 30 100\n");
+  b.update(1500);
+  send(b, "garbage\n");
+  b.update(TIMEOUT_MS);
+  TEST_ASSERT_EQUAL_INT(0, b.onCount());
+}
+
 int main() {
   UNITY_BEGIN();
   RUN_TEST(test_starts_off);
@@ -112,5 +157,10 @@ int main() {
   RUN_TEST(test_crlf_and_junk);
   RUN_TEST(test_long_line_recovers);
   RUN_TEST(test_empty_line_ignored);
+  RUN_TEST(test_on_sets_key_power);
+  RUN_TEST(test_strike_then_hold);
+  RUN_TEST(test_tc_r15_timeout_turns_all_off);
+  RUN_TEST(test_ping_keeps_notes_on);
+  RUN_TEST(test_tc_r16_bad_commands_dont_reset_timer);
   return UNITY_END();
 }

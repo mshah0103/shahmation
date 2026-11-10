@@ -13,6 +13,64 @@ type SongsResponse = {
   songs: Song[];
 };
 
+type BoardInfo = {
+  connected: boolean;
+  board_number: number | null;
+  first_note: number | null;
+  last_note: number | null;
+  simulated: boolean;
+};
+
+type PlayerStatus = {
+  state: "idle" | "playing" | "paused";
+  title: string | null;
+  position: number;
+  length: number;
+  error: string | null;
+};
+
+async function post(url: string): Promise<any> {
+  const response = await fetch(url, { method: "POST" });
+  const data = await response.json();
+  if (!response.ok) {
+    throw new Error(data.error ?? "Something went wrong");
+  }
+  return data;
+}
+
+const boardBar = document.createElement("div");
+boardBar.className = "bar";
+const boardStatus = document.createElement("span");
+boardStatus.textContent = "Board: not connected";
+const connectButton = document.createElement("button");
+connectButton.textContent = "Connect";
+const panicButton = document.createElement("button");
+panicButton.textContent = "PANIC";
+panicButton.className = "panic";
+boardBar.append(boardStatus, connectButton, panicButton);
+
+const keyCheckHeading = document.createElement("h2");
+keyCheckHeading.textContent = "Key Check";
+const noteBox = document.createElement("input");
+noteBox.type = "number";
+noteBox.className = "note";
+noteBox.value = "21";
+const testButton = document.createElement("button");
+testButton.textContent = "Test";
+const keyCheckStatus = document.createElement("p");
+
+const nowBar = document.createElement("div");
+nowBar.className = "bar";
+const nowTitle = document.createElement("span");
+nowTitle.textContent = "Nothing playing";
+const nowTime = document.createElement("span");
+const pauseButton = document.createElement("button");
+pauseButton.textContent = "Pause";
+const stopButton = document.createElement("button");
+stopButton.textContent = "Stop";
+const nowError = document.createElement("p");
+nowBar.append(nowTitle, nowTime, pauseButton, stopButton);
+
 // build the page
 const heading = document.createElement("h1");
 heading.textContent = "ShahMation Library";
@@ -41,14 +99,24 @@ for (const name of ["Title", "Composer", "Length"]) {
   headerRow.appendChild(th);
 }
 const tableBody = table.createTBody();
+const songList = document.createElement("div");
+songList.className = "songs";
+songList.appendChild(table);
 
 document.body.append(
+  boardBar,
+  nowBar,
+  nowError,
+  keyCheckHeading,
+  noteBox,
+  testButton,
+  keyCheckStatus,
   heading,
   addLabel,
   uploadStatus,
   searchBox,
   statusLine,
-  table,
+  songList,
 );
 
 // seconds to minutes with a dash as placeholder if value cannot be determined
@@ -69,6 +137,7 @@ function showSongs(songs: Song[]) {
     row.insertCell().textContent = song.title;
     row.insertCell().textContent = song.composer ?? "";
     row.insertCell().textContent = formatLength(song.duration_seconds);
+    row.addEventListener("click", () => playSong(song));
   }
 }
 
@@ -149,5 +218,97 @@ fileInput.addEventListener("change", async () => {
   fileInput.value = "";
 });
 
+
+let boardMessage = "";
+
+function showBoard(info: BoardInfo) {
+  if (info.connected && info.simulated) {
+    boardStatus.textContent =
+      "Simulated piano connected · " + ((info.last_note ?? 0) - (info.first_note ?? 0) + 1) + " keys";
+  } else if (info.connected) {
+    boardStatus.textContent =
+      "Board " + info.board_number + " connected (notes " + info.first_note + " to " + info.last_note + ")";
+  } else {
+    boardStatus.textContent = boardMessage || "Board: not connected";
+  }
+}
+
+connectButton.addEventListener("click", async () => {
+  boardStatus.textContent = "Connecting…";
+  boardMessage = "";
+  try {
+    showBoard(await post("/api/board/connect"));
+  } catch (e) {
+    boardMessage = (e as Error).message;
+    boardStatus.textContent = boardMessage;
+  }
+});
+
+panicButton.addEventListener("click", async () => {
+  boardMessage = "PANIC: all off. Press Connect to play again";
+  try {
+    showBoard(await post("/api/panic"));
+  } catch {
+    boardStatus.textContent = "Couldn't reach the server";
+  }
+  refresh();
+});
+
+testButton.addEventListener("click", async () => {
+  keyCheckStatus.textContent = "Testing note " + noteBox.value + "…";
+  try {
+    await post("/api/board/test?note=" + encodeURIComponent(noteBox.value));
+    keyCheckStatus.textContent = "Played note " + noteBox.value;
+  } catch (e) {
+    keyCheckStatus.textContent = (e as Error).message;
+  }
+});
+
+
+async function playSong(song: Song) {
+  nowError.textContent = "";
+  try {
+    showPlayer(await post("/api/play?music_id=" + song.music_id));
+  } catch (e) {
+    nowError.textContent = (e as Error).message;
+  }
+}
+
+function showPlayer(status: PlayerStatus) {
+  if (status.state === "idle") {
+    nowTitle.textContent = status.title ? "Finished: " + status.title : "Nothing playing";
+  } else {
+    nowTitle.textContent = "Now performing: " + status.title;
+  }
+  nowTime.textContent = formatLength(status.position) + " / " + formatLength(status.length);
+  pauseButton.textContent = status.state === "paused" ? "Resume" : "Pause";
+  pauseButton.disabled = status.state === "idle";
+  stopButton.disabled = status.state === "idle";
+  if (status.error) {
+    nowError.textContent = status.error;
+  }
+}
+
+async function refresh() {
+  try {
+    const info: BoardInfo = await (await fetch("/api/board")).json();
+    const status: PlayerStatus = await (await fetch("/api/player")).json();
+    showBoard(info);
+    showPlayer(status);
+  } catch {
+  }
+}
+
+pauseButton.addEventListener("click", async () => {
+  const url = pauseButton.textContent === "Resume" ? "/api/resume" : "/api/pause";
+  showPlayer(await post(url));
+});
+
+stopButton.addEventListener("click", async () => {
+  showPlayer(await post("/api/stop"));
+});
+
 // show everything when the page first opens
 search("");
+refresh();
+setInterval(refresh, 500);

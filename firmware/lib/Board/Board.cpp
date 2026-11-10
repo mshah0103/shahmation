@@ -24,12 +24,24 @@ Board::Board() {
   length = 0;
   tooLong = false;
   reply[0] = '\0';
+  now = 0;
+  timer.reset(0);
   allOff();
 }
 
+void Board::update(unsigned long time) {
+  now = time;
+  for (int i = 0; i < NUM_KEYS; i++) {
+    keys[i].update(now);
+  }
+  if (timer.expired(now) && onCount() > 0) {
+    allOff();
+  }
+}
+
 void Board::allOff() {
-  for (int i = 0; i <= LAST_NOTE - FIRST_NOTE; i++) {
-    on[i] = false;
+  for (int i = 0; i < NUM_KEYS; i++) {
+    keys[i].release();
   }
 }
 
@@ -37,17 +49,24 @@ bool Board::isOn(int note) {
   if (note < FIRST_NOTE || note > LAST_NOTE) {
     return false;
   }
-  return on[note - FIRST_NOTE];
+  return keys[note - FIRST_NOTE].isOn();
 }
 
 int Board::onCount() {
   int count = 0;
-  for (int i = 0; i <= LAST_NOTE - FIRST_NOTE; i++) {
-    if (on[i]) {
+  for (int i = 0; i < NUM_KEYS; i++) {
+    if (keys[i].isOn()) {
       count++;
     }
   }
   return count;
+}
+
+int Board::power(int channel) {
+  if (channel < 0 || channel >= NUM_KEYS) {
+    return 0;
+  }
+  return keys[channel].power();
 }
 
 const char* Board::feed(char c) {
@@ -123,7 +142,7 @@ const char* Board::receive(const char* text) {
     } else if (velocity < 1 || velocity > 127) {
       snprintf(reply, sizeof(reply), "ERR bad velocity");
     } else {
-      on[note - FIRST_NOTE] = true;
+      keys[note - FIRST_NOTE].strike(velocity, now);
       snprintf(reply, sizeof(reply), "OK");
     }
   } else if (wordLength == 3 && strncmp(text, "OFF", 3) == 0) {
@@ -132,11 +151,14 @@ const char* Board::receive(const char* text) {
     } else if (note < FIRST_NOTE || note > LAST_NOTE) {
       snprintf(reply, sizeof(reply), "ERR note out of range");
     } else {
-      on[note - FIRST_NOTE] = false;
+      keys[note - FIRST_NOTE].release();
       snprintf(reply, sizeof(reply), "OK");
     }
   } else {
     snprintf(reply, sizeof(reply), "ERR unknown command");
+  }
+  if (strncmp(reply, "ERR", 3) != 0) {
+    timer.reset(now);
   }
   return reply;
 }

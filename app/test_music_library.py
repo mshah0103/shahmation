@@ -228,6 +228,15 @@ class MusicLibraryTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             self.library.add("   .mid", midi_bytes())
 
+    def test_get_and_file_path(self):
+        self.library.load_index(self.csv_path)
+        song = self.library.search("maple")[0]
+        self.assertEqual(self.library.get(song.music_id).title, "Maple Leaf Rag")
+        self.assertTrue(self.library.file_path(song).exists())
+        mine = self.library.add("Mine.mid", midi_bytes(70))
+        self.assertEqual(self.library.file_path(mine), self.personal / "Mine.mid")
+        self.assertIsNone(self.library.get(99999))
+
 
 if __name__ == "__main__":
     unittest.main()
